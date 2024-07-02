@@ -2,7 +2,7 @@
     Generative Model Evaluations
     Metrics: 
     3D MSSSIM
-    3D FID using Resnet50
+    3D FID using Resnet50/101/others
     3D MMD in image space & feature space (resnet50)
     PCA
 """
@@ -52,6 +52,7 @@ PATH = '/scratch/project_2001654/Wpeng/data/MRI_Three/MRI_High/'
 BATCH_SIZE = 2
 NUM_WORKERS = 2
 
+# TODO: Use your own way of loading model
 model_config = {
     'HA-GAN':  {
         "name": "HA-GAN",
@@ -221,22 +222,6 @@ def sample_generation_gan(model: torch.nn.Module, model_config: dict, num_sample
     return fake_samples
 
 
-# def evaluate_mmd_feature(fake_samples: list, data_loader: torch.utils.data.DataLoader, feature_extractor_ckpt: str):
-#     model = get_feature_extractor34().to(device)
-#     torch.cuda.empty_cache()
-#     batch_size = 2
-#     num_samples = len(fake_samples)
-#     dims=2048
-#     pred_arr = np.empty((num_samples, dims))
-#     for i, sample in enumerate(fake_samples):
-#         with torch.no_grad():
-#             x_rand = nib.load(sample).get_fdata().to(device)
-#             pred = model(x_rand)
-#             pred_arr[i, :] = pred.cpu().numpy()
-#     act_real = get_activations_from_dataloader(model, data_loader, device, batch_size=batch_size, num_samples=num_samples)
-#     mmd_score = compute_mmd_feature(act_real, pred_arr)
-#     return mmd_score
-
 
 def evaluate_fid_mmd(fake_samples: list, real_sample: list, extractor_ckpt: str, save=True, save_name="./results/fid/HAGAN/", load=False, load_path=None, resnet=101) -> float:
     """
@@ -244,6 +229,7 @@ def evaluate_fid_mmd(fake_samples: list, real_sample: list, extractor_ckpt: str,
         fake_samples: list of sample file names
         load: if you have already computed fid and saved it somewhere
         resnet: the version of your feature extractor e.g., 50 for ResNet50
+        Code adapted from https://github.com/batmanlab/HA-GAN
     """
     print("====> Starting FID Evaluation <===")
     if not load:
@@ -258,7 +244,6 @@ def evaluate_fid_mmd(fake_samples: list, real_sample: list, extractor_ckpt: str,
             with torch.no_grad():
                 x_rand = sample
                 x_rand = torch.from_numpy(x_rand).unsqueeze(0).unsqueeze(0).float().to(device)
-                # assert x_rand.shape == (1, 1, 144, 192, 144)
                 pred = model(x_rand)
                 if device == torch.device('cuda'):
                     pred_arr[i, :] = pred.cpu().numpy()
@@ -290,19 +275,16 @@ def evaluate_fid_mmd(fake_samples: list, real_sample: list, extractor_ckpt: str,
     print("MMD score is: ", mmd_score)
     return fid_score, mmd_score
 
-def evaluate_msssim(fake_samples: list, real_samples: list, model_name: str, normalize=False, window_size=11) -> float:
+def evaluate_msssim(fake_samples: list, real_samples: list, model_name: str, num_iter=10, normalize=False, window_size=11, save=False, dest=None) -> float:
     """
         3D Multi-Scale SSIM calculation between 1 fake & 1 randomly selected real volume
         normalize: to avoid numerical instability, may or may not happen so default to False
+        iter: number of iterations (may be very slow)
     """
     print("====> Starting 3D SSIM Evaluation <====")
-    # from monai_msssim import MultiScaleSSIMMetric
-    # msssim_3d = MultiScaleSSIMMetric(spatial_dims=3)
-    # ssim_loss = pytorch_ssim.SSIM3D(window_size=window_size)
-
     fake_ssim = 0.0
     count = 0
-    for j in range(10):
+    for j in range(num_iter):
         for i in tqdm(range(len(fake_samples))):
             # get one fake sample
             vol1 = Variable(torch.from_numpy(fake_samples[i]).unsqueeze(0).unsqueeze(0)) # (144, 192, 144)
@@ -322,8 +304,9 @@ def evaluate_msssim(fake_samples: list, real_samples: list, model_name: str, nor
     avg_fake_ssim = fake_ssim/count
     print("Fake volume avg ssim: ", avg_fake_ssim)
 
-    with open(f"./results/msssim/{model_name}.txt", 'w') as fw:
-        fw.write(f"Fake volume avg ssim: {avg_fake_ssim}")
+    if save and dest:
+        with open(os.path.join(dest, {model_name}.txt), 'w') as fw:
+            fw.write(f"Fake volume avg ssim: {avg_fake_ssim}")
 
     return avg_fake_ssim
 
@@ -343,7 +326,7 @@ def msssim_real(real_samples: list):
     print("Real volume avg ssim: ", avg_real_ssim)
     return avg_real_ssim
 
-def compute_mmd_feature(act_real: np.ndarray, act_fake: np.ndarray, num_iter=2):
+def compute_mmd_feature(act_real: np.ndarray, act_fake: np.ndarray, num_iter=10):
     """
         Compute feature space MMD statistics between real & fake sample
         Take 2 real & 2 fake samples at a time and compute the distance
@@ -370,6 +353,9 @@ def compute_mmd_feature(act_real: np.ndarray, act_fake: np.ndarray, num_iter=2):
     return mean_feature_mmd
 
 def pad_vol(img, shape=(144, 192, 144), pad_val=-1):
+    '''
+        Pad volume to desired shape, in torch format
+    '''
     if img.shape[1:] == shape:
         return img
     target = torch.ones((1, 144, 192, 144)) * pad_val
@@ -382,6 +368,9 @@ def pad_vol(img, shape=(144, 192, 144), pad_val=-1):
     return target.float().permute(0, 3, 2, 1)
 
 def pad_vol_np(img, shape=(144, 192, 144), pad_val=-1):
+    '''
+        Pad volume in numpy format
+    '''
     target = np.ones((144, 192, 144)) * pad_val
     d_, h_, w_ = shape
     d, h, w = img.shape
@@ -397,6 +386,8 @@ def evaluate_mmd_image(fake_samples: list, real_samples: list, model_name: str, 
         Calculate MMD on flattened volume
         Take one fake volume and one random real volume
         Returned an avg value over num_iter iterations
+        Default to batch size 2
+        Code adapted from https://github.com/cyclomon/3dbraingen
     """
     meanarr = []
     for s in range(num_iter):

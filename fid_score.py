@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+'''
+    Code is from https://github.com/batmanlab/HA-GAN
+'''
 
 import os
 import time
