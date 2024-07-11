@@ -331,6 +331,7 @@ def compute_mmd_feature(act_real: np.ndarray, act_fake: np.ndarray, num_iter=10)
         Compute feature space MMD statistics between real & fake sample
         Take 2 real & 2 fake samples at a time and compute the distance
         Can take a long time if large num_iter
+        Adapted from: https://github.com/cyclomon/3dbraingen
     """
     print("====> Starting feature-space MMD evaluation <====")
 
