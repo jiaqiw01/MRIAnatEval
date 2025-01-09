@@ -1,5 +1,7 @@
 # MRIAnatEval
-Git repository for MICCAI 2024
+Git repository for MICCAI 2024 <br>
+Model Checkpoint: https://drive.google.com/drive/folders/1EYNj_Pz2q7Jw7TuZz3FbCqCwqjOGuuLL?usp=sharing <br>
+Please note that we do not have 256, 256, 256 shape so we made slight modification on GAN models!
 ## Metrics included:
 1. FID
 2. MMD
